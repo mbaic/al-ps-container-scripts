@@ -2,6 +2,8 @@
 
 Professional PowerShell tool for managing Business Central Docker containers locally. Select a container and perform operations from an organized, interactive menu.
 
+> **Note:** This is a demonstration tool — published to show what's possible with PowerShell and BcContainerHelper for local Business Central container management. It reflects how I work with BC containers in my own development environment. Use it as a starting point and adapt to your own workflow and needs.
+
 ## Features
 
 - 🎯 Clean, organized menu interface
@@ -250,8 +252,12 @@ The script provides professional, formatted output for all operations:
 
 ## License
 
-This script is provided as-is for Business Central container management.
+MIT License
 
-## Support
+Copyright (c) 2026 Milos Baic
 
-For issues or feature requests, please refer to your organization's support channels or BcContainerHelper documentation.
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
