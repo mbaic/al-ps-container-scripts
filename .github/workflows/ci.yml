@@ -1,0 +1,159 @@
+name: CI
+
+# Verifies the menu script without a Business Central container:
+#   - parses under Windows PowerShell 5.1 and PowerShell 7, saved as UTF-8 with BOM
+#   - PSScriptAnalyzer: errors fail the build, warnings are reported as annotations
+#   - Pester unit tests on 5.1 and 7
+#   - Contract tests against the real BcContainerHelper module (commands and parameter names exist)
+# Container operations themselves cannot run on hosted runners (Windows containers, multi-GB
+# BC images and a license would be needed) - smoke-test those locally.
+
+on:
+  push:
+    branches: [main, 'feature/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SCRIPT: Admin.Containers.AsMenu.ps1
+
+jobs:
+  static:
+    name: Parse, encoding & lint
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Parse - Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $env:SCRIPT).Path, [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) {
+            $errors | ForEach-Object { Write-Output "::error file=$env:SCRIPT,line=$($_.Extent.StartLineNumber)::$($_.Message)" }
+            exit 1
+          }
+          Write-Output "Parsed OK with PowerShell $($PSVersionTable.PSVersion)"
+
+      - name: Parse - PowerShell 7
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $env:SCRIPT).Path, [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) {
+            $errors | ForEach-Object { Write-Output "::error file=$env:SCRIPT,line=$($_.Extent.StartLineNumber)::$($_.Message)" }
+            exit 1
+          }
+          Write-Output "Parsed OK with PowerShell $($PSVersionTable.PSVersion)"
+
+      - name: Encoding - UTF-8 with BOM
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in @($env:SCRIPT) + @(Get-ChildItem tests -Filter *.ps1 | ForEach-Object FullName)) {
+            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $file).Path)
+            if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
+              Write-Output "::error file=$file::Must be saved as UTF-8 with BOM (Windows PowerShell 5.1 misreads the Unicode characters otherwise)"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+          Write-Output 'All PowerShell files have a UTF-8 BOM'
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          # Write-Host is intentional: this is an interactive console tool.
+          $results = @(Invoke-ScriptAnalyzer -Path $env:SCRIPT -Severity Error, Warning -ExcludeRule PSAvoidUsingWriteHost)
+          foreach ($r in $results) {
+            $level = if ($r.Severity -eq 'Error') { 'error' } else { 'warning' }
+            Write-Output "::$level file=$env:SCRIPT,line=$($r.Line)::[$($r.RuleName)] $($r.Message)"
+          }
+          $results | Group-Object RuleName | Sort-Object Count -Descending | Format-Table Count, Name -AutoSize | Out-String | Write-Output
+          $errorCount = @($results | Where-Object Severity -eq 'Error').Count
+          Write-Output "Errors: $errorCount, warnings: $($results.Count - $errorCount)"
+          if ($errorCount -gt 0) { exit 1 }
+
+  unit:
+    name: Unit tests (${{ matrix.shell }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Pester 5
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run unit tests
+        run: |
+          Import-Module Pester -MinimumVersion 5.5.0
+          $config = New-PesterConfiguration
+          # Only the unit test file: the contract file imports BcContainerHelper during discovery.
+          $config.Run.Path               = './tests/Admin.Containers.AsMenu.Tests.ps1'
+          $config.Run.Exit               = $true
+          $config.Output.Verbosity       = 'Detailed'
+          $config.TestResult.Enabled     = $true
+          $config.TestResult.OutputPath  = "test-results-unit-${{ matrix.shell }}.xml"
+          $config.TestResult.OutputFormat = 'JUnitXml'
+          Invoke-Pester -Configuration $config
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-unit-${{ matrix.shell }}
+          path: test-results-unit-${{ matrix.shell }}.xml
+          if-no-files-found: ignore
+
+  contract:
+    name: BcContainerHelper contract
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Pester 5 and BcContainerHelper
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module BcContainerHelper -Scope CurrentUser -Force -AllowClobber
+          $bch = Get-Module BcContainerHelper -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+          Write-Output "BcContainerHelper $($bch.Version)"
+
+      - name: Run contract tests
+        shell: pwsh
+        run: |
+          Import-Module Pester -MinimumVersion 5.5.0
+          $config = New-PesterConfiguration
+          $config.Run.Path               = './tests/BcContainerHelper.Contract.Tests.ps1'
+          $config.Run.Exit               = $true
+          $config.Output.Verbosity       = 'Detailed'
+          $config.TestResult.Enabled     = $true
+          $config.TestResult.OutputPath  = 'test-results-contract.xml'
+          $config.TestResult.OutputFormat = 'JUnitXml'
+          Invoke-Pester -Configuration $config
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-contract
+          path: test-results-contract.xml
+          if-no-files-found: ignore
